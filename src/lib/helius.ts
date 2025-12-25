@@ -1,0 +1,100 @@
+import { Connection, PublicKey } from '@solana/web3.js';
+import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
+import { Holder } from './types';
+
+const connection = new Connection(
+  process.env.HELIUS_RPC_URL || '',
+  'confirmed'
+);
+
+const TOKEN_2022_PROGRAM_ID = new PublicKey(
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+);
+
+export async function getHolders({ 
+  mint, 
+  min = 10000 
+}: { 
+  mint: string; 
+  min: number; 
+}): Promise<Holder[]> {
+  if (!process.env.HELIUS_RPC_URL) {
+    throw new Error('HELIUS_RPC_URL environment variable is not set');
+  }
+
+  try {
+    const mintPubkey = new PublicKey(mint);
+    
+    const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
+    if (!mintAccountInfo) {
+      throw new Error(`Mint account not found: ${mintPubkey.toBase58()}`);
+    }
+
+    let tokenProgramId = TOKEN_PROGRAM_ID;
+    if (mintAccountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+      tokenProgramId = TOKEN_2022_PROGRAM_ID;
+    } else if (!mintAccountInfo.owner.equals(TOKEN_PROGRAM_ID)) {
+      throw new Error(
+        `Unsupported mint owner program: ${mintAccountInfo.owner.toBase58()}`
+      );
+    }
+
+    // Get mint info to get decimals
+    const mintData = MintLayout.decode(mintAccountInfo.data);
+    const decimals = mintData.decimals as number;
+
+    // Get all token accounts for this mint
+    const filters = [
+      {
+        memcmp: {
+          offset: 0, // mint field offset
+          bytes: mintPubkey.toBase58(),
+        },
+      },
+    ];
+
+    if (tokenProgramId.equals(TOKEN_PROGRAM_ID)) {
+      filters.unshift({
+        dataSize: AccountLayout.span, // Token account size
+      });
+    }
+
+    const accounts = await connection.getProgramAccounts(tokenProgramId, {
+      filters,
+    });
+
+    const holders: Holder[] = [];
+
+    for (const account of accounts) {
+      try {
+        const accountData = AccountLayout.decode(account.account.data);
+        const amount = u64.fromBuffer(accountData.amount);
+        const state = accountData.state as number;
+
+        // Skip frozen or uninitialized accounts and 0 balances
+        if (state !== 1 || amount.isZero()) {
+          continue;
+        }
+
+        const uiAmount = Number(amount.toString()) / Math.pow(10, decimals);
+
+        // Filter by minimum amount
+        if (uiAmount >= min) {
+          holders.push({
+            owner: new PublicKey(accountData.owner).toBase58(),
+            amount: amount.toString(),
+            uiAmount: uiAmount,
+          });
+        }
+      } catch (error) {
+        console.error('Error parsing account data:', error);
+        continue;
+      }
+    }
+
+    return holders;
+  } catch (error) {
+    console.error('Error fetching holders:', error);
+    throw error;
+  }
+}
