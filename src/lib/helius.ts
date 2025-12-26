@@ -1,3 +1,6 @@
+import dns from 'dns';
+import https from 'https';
+import fetch, { RequestInfo, RequestInit } from 'node-fetch';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
 import { Holder } from './types';
@@ -6,40 +9,72 @@ const TOKEN_2022_PROGRAM_ID = new PublicKey(
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 );
 
-const getHeliusRpcUrls = () => {
-  const rawUrl = process.env.HELIUS_RPC_URL;
-  if (!rawUrl) {
-    throw new Error('HELIUS_RPC_URL environment variable is not set');
-  }
-
+const normalizeRpcUrl = (rawUrl: string, label: string) => {
   const trimmed = rawUrl.trim();
   const stripped = trimmed.replace(/^['"]|['"]$/g, '');
   const sanitized = stripped.replace(/\s+/g, '');
 
   if (!sanitized.startsWith('https://') && !sanitized.startsWith('http://')) {
-    throw new Error('HELIUS_RPC_URL must start with https://');
+    throw new Error(`${label} must start with https://`);
   }
 
   let url: URL;
   try {
     url = new URL(sanitized);
   } catch {
-    throw new Error('HELIUS_RPC_URL is invalid');
+    throw new Error(`${label} is invalid`);
   }
 
-  const urls = [url.toString()];
-  const host = url.hostname.toLowerCase();
+  return url.toString();
+};
 
-  if (host === 'rpc.helius.xyz') {
-    url.hostname = 'mainnet.helius-rpc.com';
-    urls.push(url.toString());
-  } else if (host === 'mainnet.helius-rpc.com') {
-    url.hostname = 'rpc.helius.xyz';
-    urls.push(url.toString());
+const getHeliusRpcUrls = () => {
+  const rawUrl = process.env.HELIUS_RPC_URL;
+  if (!rawUrl) {
+    throw new Error('HELIUS_RPC_URL environment variable is not set');
+  }
+
+  const primaryUrl = normalizeRpcUrl(rawUrl, 'HELIUS_RPC_URL');
+  const urls = [primaryUrl];
+
+  const primaryHost = new URL(primaryUrl).hostname.toLowerCase();
+  if (primaryHost === 'rpc.helius.xyz') {
+    const alt = new URL(primaryUrl);
+    alt.hostname = 'mainnet.helius-rpc.com';
+    urls.push(alt.toString());
+  } else if (primaryHost === 'mainnet.helius-rpc.com') {
+    const alt = new URL(primaryUrl);
+    alt.hostname = 'rpc.helius.xyz';
+    urls.push(alt.toString());
+  }
+
+  const extraFallbacks = [
+    process.env.SOLANA_RPC_FALLBACK_URL,
+    process.env.SOLANA_RPC_URL,
+    'https://api.mainnet-beta.solana.com',
+  ];
+
+  for (const fallback of extraFallbacks) {
+    if (!fallback) {
+      continue;
+    }
+    try {
+      const normalized = normalizeRpcUrl(fallback, 'RPC fallback URL');
+      urls.push(normalized);
+    } catch {
+      continue;
+    }
   }
 
   return Array.from(new Set(urls));
 };
+
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+const httpsAgent = new https.Agent({ keepAlive: true });
+const fetchWithAgent = (input: RequestInfo, init?: RequestInit) =>
+  fetch(input, { ...init, agent: httpsAgent });
 
 export async function getHolders({ 
   mint, 
@@ -126,17 +161,34 @@ export async function getHolders({
   for (let i = 0; i < rpcUrls.length; i += 1) {
     const rpcUrl = rpcUrls[i];
     try {
-      const connection = new Connection(rpcUrl, 'confirmed');
+      const connection = new Connection(rpcUrl, {
+        commitment: 'confirmed',
+        fetch: fetchWithAgent,
+      });
       return await fetchWithConnection(connection);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const isTlsError = message.includes('SSL') || message.includes('tlsv1');
+      const isNetworkError =
+        message.includes('ECONNRESET') ||
+        message.includes('ENOTFOUND') ||
+        message.includes('EAI_AGAIN') ||
+        message.includes('fetch failed') ||
+        message.includes('socket');
+      const shouldRetry = (isTlsError || isNetworkError) && i < rpcUrls.length - 1;
 
-      if (isTlsError && i < rpcUrls.length - 1) {
+      if (shouldRetry) {
         continue;
       }
 
-      console.error('Error fetching holders:', error);
+      let host = rpcUrl;
+      try {
+        host = new URL(rpcUrl).hostname;
+      } catch {
+        // ignore
+      }
+
+      console.error(`Error fetching holders from ${host}:`, error);
       throw error;
     }
   }
