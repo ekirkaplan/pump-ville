@@ -1,6 +1,6 @@
+import axios from 'axios';
 import dns from 'dns';
 import https from 'https';
-import fetch, { RequestInfo, RequestInit } from 'node-fetch';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
 import { Holder } from './types';
@@ -73,8 +73,67 @@ if (typeof dns.setDefaultResultOrder === 'function') {
   dns.setDefaultResultOrder('ipv4first');
 }
 const httpsAgent = new https.Agent({ keepAlive: true });
-const fetchWithAgent = (input: RequestInfo, init?: RequestInit) =>
-  fetch(input, { ...init, agent: httpsAgent });
+
+const normalizeHeaders = (headers?: HeadersInit): Record<string, string> => {
+  if (!headers) {
+    return {};
+  }
+  if (headers instanceof Headers) {
+    const output: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      output[key] = value;
+    });
+    return output;
+  }
+  if (Array.isArray(headers)) {
+    const output: Record<string, string> = {};
+    for (const [key, value] of headers) {
+      output[key] = String(value);
+    }
+    return output;
+  }
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    output[key] = String(value);
+  }
+  return output;
+};
+
+const axiosFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const method = init?.method || (typeof input !== 'string' && !(input instanceof URL) ? input.method : undefined) || 'GET';
+  const headers = {
+    ...(typeof input !== 'string' && !(input instanceof URL) ? normalizeHeaders(input.headers) : {}),
+    ...normalizeHeaders(init?.headers),
+  };
+
+  const response = await axios({
+    url,
+    method,
+    headers,
+    data: init?.body,
+    timeout: 15000,
+    responseType: 'text',
+    validateStatus: () => true,
+    httpsAgent,
+  });
+
+  const responseHeaders = new Headers();
+  for (const [key, value] of Object.entries(response.headers || {})) {
+    if (Array.isArray(value)) {
+      responseHeaders.set(key, value.join(', '));
+    } else if (value != null) {
+      responseHeaders.set(key, String(value));
+    }
+  }
+
+  const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? {});
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
+  });
+};
 
 export async function getHolders({ 
   mint, 
@@ -163,7 +222,7 @@ export async function getHolders({
     try {
       const connection = new Connection(rpcUrl, {
         commitment: 'confirmed',
-        fetch: fetchWithAgent,
+        fetch: axiosFetch,
       });
       return await fetchWithConnection(connection);
     } catch (error) {
