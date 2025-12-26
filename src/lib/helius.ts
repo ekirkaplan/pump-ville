@@ -1,12 +1,9 @@
-import axios from 'axios';
-import dns from 'dns';
-import https from 'https';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
 import { Holder } from './types';
 
 const TOKEN_2022_PROGRAM_ID = new PublicKey(
-  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+    'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 );
 
 const normalizeRpcUrl = (rawUrl: string, label: string) => {
@@ -69,84 +66,37 @@ const getHeliusRpcUrls = () => {
   return Array.from(new Set(urls));
 };
 
-if (typeof dns.setDefaultResultOrder === 'function') {
-  dns.setDefaultResultOrder('ipv4first');
-}
-const httpsAgent = new https.Agent({ keepAlive: true });
+// Vercel uyumlu fetch wrapper - timeout destekli
+const fetchWithTimeout = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 saniye timeout
 
-const normalizeHeaders = (headers?: HeadersInit): Record<string, string> => {
-  if (!headers) {
-    return {};
-  }
-  if (headers instanceof Headers) {
-    const output: Record<string, string> = {};
-    headers.forEach((value, key) => {
-      output[key] = value;
+  try {
+    const response = await fetch(input, {
+      ...init,
+      signal: controller.signal,
     });
-    return output;
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (Array.isArray(headers)) {
-    const output: Record<string, string> = {};
-    for (const [key, value] of headers) {
-      output[key] = String(value);
-    }
-    return output;
-  }
-  const output: Record<string, string> = {};
-  for (const [key, value] of Object.entries(headers)) {
-    output[key] = String(value);
-  }
-  return output;
 };
 
-const axiosFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-  const method = init?.method || (typeof input !== 'string' && !(input instanceof URL) ? input.method : undefined) || 'GET';
-  const headers = {
-    ...(typeof input !== 'string' && !(input instanceof URL) ? normalizeHeaders(input.headers) : {}),
-    ...normalizeHeaders(init?.headers),
-  };
-
-  const response = await axios({
-    url,
-    method,
-    headers,
-    data: init?.body,
-    timeout: 15000,
-    responseType: 'text',
-    validateStatus: () => true,
-    httpsAgent,
-  });
-
-  const responseHeaders = new Headers();
-  for (const [key, value] of Object.entries(response.headers || {})) {
-    if (Array.isArray(value)) {
-      responseHeaders.set(key, value.join(', '));
-    } else if (value != null) {
-      responseHeaders.set(key, String(value));
-    }
-  }
-
-  const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? {});
-  return new Response(body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: responseHeaders,
-  });
-};
-
-export async function getHolders({ 
-  mint, 
-  min = 10000 
-}: { 
-  mint: string; 
-  min: number; 
+export async function getHolders({
+                                   mint,
+                                   min = 10000
+                                 }: {
+  mint: string;
+  min: number;
 }): Promise<Holder[]> {
   const rpcUrls = getHeliusRpcUrls();
 
   const fetchWithConnection = async (connection: Connection) => {
     const mintPubkey = new PublicKey(mint);
-    
+
     const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
     if (!mintAccountInfo) {
       throw new Error(`Mint account not found: ${mintPubkey.toBase58()}`);
@@ -157,7 +107,7 @@ export async function getHolders({
       tokenProgramId = TOKEN_2022_PROGRAM_ID;
     } else if (!mintAccountInfo.owner.equals(TOKEN_PROGRAM_ID)) {
       throw new Error(
-        `Unsupported mint owner program: ${mintAccountInfo.owner.toBase58()}`
+          `Unsupported mint owner program: ${mintAccountInfo.owner.toBase58()}`
       );
     }
 
@@ -217,29 +167,45 @@ export async function getHolders({
     return holders;
   };
 
+  let lastError: Error | null = null;
+
   for (let i = 0; i < rpcUrls.length; i += 1) {
     const rpcUrl = rpcUrls[i];
     try {
       const connection = new Connection(rpcUrl, {
         commitment: 'confirmed',
-        fetch: axiosFetch,
+        fetch: fetchWithTimeout,
       });
       return await fetchWithConnection(connection);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const isTlsError = message.includes('SSL') || message.includes('tlsv1');
-      const isNetworkError =
-        message.includes('ECONNRESET') ||
-        message.includes('ENOTFOUND') ||
-        message.includes('EAI_AGAIN') ||
-        message.includes('fetch failed') ||
-        message.includes('socket');
-      const shouldRetry = (isTlsError || isNetworkError) && i < rpcUrls.length - 1;
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const message = lastError.message;
 
-      if (shouldRetry) {
+      const isRetryableError =
+          message.includes('SSL') ||
+          message.includes('tlsv1') ||
+          message.includes('ECONNRESET') ||
+          message.includes('ENOTFOUND') ||
+          message.includes('EAI_AGAIN') ||
+          message.includes('fetch failed') ||
+          message.includes('socket') ||
+          message.includes('aborted') ||
+          message.includes('timeout') ||
+          message.includes('ETIMEDOUT');
+
+      // Eğer retry yapılabilir bir hata ise ve daha fazla URL varsa devam et
+      if (isRetryableError && i < rpcUrls.length - 1) {
+        let host = rpcUrl;
+        try {
+          host = new URL(rpcUrl).hostname;
+        } catch {
+          // ignore
+        }
+        console.warn(`RPC ${host} failed, trying next endpoint...`);
         continue;
       }
 
+      // Son endpoint veya retry yapılamaz hata
       let host = rpcUrl;
       try {
         host = new URL(rpcUrl).hostname;
@@ -252,5 +218,5 @@ export async function getHolders({
     }
   }
 
-  throw new Error('Failed to fetch holders from all RPC endpoints');
+  throw lastError || new Error('Failed to fetch holders from all RPC endpoints');
 }
