@@ -2,14 +2,30 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
 import { Holder } from './types';
 
-const connection = new Connection(
-  process.env.HELIUS_RPC_URL || '',
-  'confirmed'
-);
-
 const TOKEN_2022_PROGRAM_ID = new PublicKey(
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 );
+
+const getHeliusConnection = () => {
+  const rawUrl = process.env.HELIUS_RPC_URL;
+  if (!rawUrl) {
+    throw new Error('HELIUS_RPC_URL environment variable is not set');
+  }
+
+  const trimmed = rawUrl.trim();
+  const sanitized = trimmed.replace(/^['"]|['"]$/g, '');
+
+  if (!sanitized.startsWith('https://') && !sanitized.startsWith('http://')) {
+    throw new Error('HELIUS_RPC_URL must start with https://');
+  }
+
+  try {
+    const url = new URL(sanitized);
+    return new Connection(url.toString(), 'confirmed');
+  } catch (error) {
+    throw new Error('HELIUS_RPC_URL is invalid');
+  }
+};
 
 export async function getHolders({ 
   mint, 
@@ -18,9 +34,7 @@ export async function getHolders({
   mint: string; 
   min: number; 
 }): Promise<Holder[]> {
-  if (!process.env.HELIUS_RPC_URL) {
-    throw new Error('HELIUS_RPC_URL environment variable is not set');
-  }
+  const connection = getHeliusConnection();
 
   try {
     const mintPubkey = new PublicKey(mint);
