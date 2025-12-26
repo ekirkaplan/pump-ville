@@ -1,5 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID, u64 } from '@solana/spl-token';
+import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { Holder } from './types';
 
 const TOKEN_2022_PROGRAM_ID = new PublicKey(
@@ -133,31 +133,42 @@ export async function getHolders({
 
     const accounts = await connection.getProgramAccounts(tokenProgramId, {
       filters,
+      dataSlice: { offset: 0, length: 109 },
     });
 
     const holders: Holder[] = [];
+    const minBaseUnits = BigInt(min) * 10n ** BigInt(decimals);
 
     for (const account of accounts) {
       try {
-        const accountData = AccountLayout.decode(account.account.data);
-        const amount = u64.fromBuffer(accountData.amount);
-        const state = accountData.state as number;
+        const data = Buffer.isBuffer(account.account.data)
+          ? account.account.data
+          : Buffer.from(account.account.data);
 
-        // Skip frozen or uninitialized accounts and 0 balances
-        if (state !== 1 || amount.isZero()) {
+        if (data.length < 109) {
           continue;
         }
 
-        const uiAmount = Number(amount.toString()) / Math.pow(10, decimals);
+        const owner = new PublicKey(data.subarray(32, 64));
+        const amount = data.readBigUInt64LE(64);
+        const state = data[108];
 
-        // Filter by minimum amount
-        if (uiAmount >= min) {
-          holders.push({
-            owner: new PublicKey(accountData.owner).toBase58(),
-            amount: amount.toString(),
-            uiAmount: uiAmount,
-          });
+        // Skip frozen or uninitialized accounts and 0 balances
+        if (state !== 1 || amount === 0n) {
+          continue;
         }
+
+        if (amount < minBaseUnits) {
+          continue;
+        }
+
+        const uiAmount = Number(amount) / Math.pow(10, decimals);
+
+        holders.push({
+          owner: owner.toBase58(),
+          amount: amount.toString(),
+          uiAmount: uiAmount,
+        });
       } catch (error) {
         console.error('Error parsing account data:', error);
         continue;

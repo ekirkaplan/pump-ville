@@ -4,6 +4,8 @@ import { getDb } from '@/lib/db';
 import { Assignment } from '@/lib/types';
 import { getTokenMintFromDb } from '@/lib/token-config';
 
+export const runtime = 'nodejs';
+
 export async function GET() {
   try {
     console.log('🔄 Starting holder refresh cron job...');
