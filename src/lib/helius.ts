@@ -139,8 +139,7 @@ export async function getHolders({
       console.error('Error fetching holders:', error);
       throw error;
     }
-  } catch (error) {
-    console.error('Error fetching holders:', error);
-    throw error;
   }
+
+  throw new Error('Failed to fetch holders from all RPC endpoints');
 }
