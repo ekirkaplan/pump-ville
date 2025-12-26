@@ -7,7 +7,6 @@ import { WorldResponse } from '@/lib/types';
 import { getTokenMintFromDb } from '@/lib/token-config';
 
 const querySchema = z.object({
-  mint: z.string().optional(),
   min: z.string().optional().transform(val => val ? parseInt(val) : 10000),
   charCount: z.string().optional().transform(val => val ? parseInt(val) : 3),
 });
@@ -16,7 +15,6 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const query = {
-      mint: searchParams.get('mint') || undefined,
       min:
         searchParams.get('min') ||
         process.env.NEXT_PUBLIC_MIN_HOLD ||
@@ -27,8 +25,8 @@ export async function GET(request: NextRequest) {
         process.env.CHAR_COUNT,
     };
 
-    const { mint: mintParam, min, charCount } = querySchema.parse(query);
-    const mint = mintParam || (await getTokenMintFromDb());
+    const { min, charCount } = querySchema.parse(query);
+    const mint = await getTokenMintFromDb();
     if (!mint) {
       return NextResponse.json({ error: 'No token yet' }, { status: 404 });
     }
