@@ -6,25 +6,39 @@ const TOKEN_2022_PROGRAM_ID = new PublicKey(
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 );
 
-const getHeliusConnection = () => {
+const getHeliusRpcUrls = () => {
   const rawUrl = process.env.HELIUS_RPC_URL;
   if (!rawUrl) {
     throw new Error('HELIUS_RPC_URL environment variable is not set');
   }
 
   const trimmed = rawUrl.trim();
-  const sanitized = trimmed.replace(/^['"]|['"]$/g, '');
+  const stripped = trimmed.replace(/^['"]|['"]$/g, '');
+  const sanitized = stripped.replace(/\s+/g, '');
 
   if (!sanitized.startsWith('https://') && !sanitized.startsWith('http://')) {
     throw new Error('HELIUS_RPC_URL must start with https://');
   }
 
+  let url: URL;
   try {
-    const url = new URL(sanitized);
-    return new Connection(url.toString(), 'confirmed');
-  } catch (error) {
+    url = new URL(sanitized);
+  } catch {
     throw new Error('HELIUS_RPC_URL is invalid');
   }
+
+  const urls = [url.toString()];
+  const host = url.hostname.toLowerCase();
+
+  if (host === 'rpc.helius.xyz') {
+    url.hostname = 'mainnet.helius-rpc.com';
+    urls.push(url.toString());
+  } else if (host === 'mainnet.helius-rpc.com') {
+    url.hostname = 'rpc.helius.xyz';
+    urls.push(url.toString());
+  }
+
+  return Array.from(new Set(urls));
 };
 
 export async function getHolders({ 
@@ -34,9 +48,9 @@ export async function getHolders({
   mint: string; 
   min: number; 
 }): Promise<Holder[]> {
-  const connection = getHeliusConnection();
+  const rpcUrls = getHeliusRpcUrls();
 
-  try {
+  const fetchWithConnection = async (connection: Connection) => {
     const mintPubkey = new PublicKey(mint);
     
     const mintAccountInfo = await connection.getAccountInfo(mintPubkey);
@@ -107,6 +121,24 @@ export async function getHolders({
     }
 
     return holders;
+  };
+
+  for (let i = 0; i < rpcUrls.length; i += 1) {
+    const rpcUrl = rpcUrls[i];
+    try {
+      const connection = new Connection(rpcUrl, 'confirmed');
+      return await fetchWithConnection(connection);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isTlsError = message.includes('SSL') || message.includes('tlsv1');
+
+      if (isTlsError && i < rpcUrls.length - 1) {
+        continue;
+      }
+
+      console.error('Error fetching holders:', error);
+      throw error;
+    }
   } catch (error) {
     console.error('Error fetching holders:', error);
     throw error;
