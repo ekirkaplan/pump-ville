@@ -213,11 +213,22 @@ class GameScene extends Phaser.Scene {
 
     private async loadCharacters() {
         try {
-            const tokenMint = process.env.NEXT_PUBLIC_TOKEN_MINT;
             const minHold = process.env.NEXT_PUBLIC_MIN_HOLD || '10000';
-            const url = `/api/world?mint=${tokenMint}&min=${minHold}&charCount=${this.CHAR_COUNT}`;
+            const params = new URLSearchParams({
+                min: minHold,
+                charCount: String(this.CHAR_COUNT),
+            });
+            const url = `/api/world?${params.toString()}`;
             const res = await fetch(url);
-            if (!res.ok) throw new Error('Failed to fetch world data');
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                if (res.status === 404 && data?.error === 'No token yet') {
+                    console.warn('No token yet - skipping character load');
+                    return;
+                }
+                const message = (data && (data.error || data.details)) || 'Failed to fetch world data';
+                throw new Error(message);
+            }
             const world: WorldResponse = await res.json();
             if (world.characters?.length) this.spawnCharacters(world.characters);
             else console.warn('No characters to spawn');

@@ -27,11 +27,13 @@ export default function WalletConnection({ onWalletConnected, onWalletDisconnect
   const [publicKey, setPublicKey] = useState<string>('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [hasEnoughTokens, setHasEnoughTokens] = useState(false);
+  const [tokenMissing, setTokenMissing] = useState(false);
 
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
     setPublicKey('');
     setHasEnoughTokens(false);
+    setTokenMissing(false);
     onWalletDisconnected();
   }, [onWalletDisconnected]);
 
@@ -40,15 +42,22 @@ export default function WalletConnection({ onWalletConnected, onWalletDisconnect
       // Test wallet özel kontrolü
       const testWallet = 'J311MsgsfcChafguWmahyxdzHvYchMcWM8vVoc4bqGWe';
       if (walletAddress === testWallet) {
+        setTokenMissing(false);
         setHasEnoughTokens(true);
         onWalletConnected(walletAddress, true);
         console.log(`Test wallet connected: ${walletAddress} - Chat enabled`);
         return;
       }
 
-      const tokenMint = process.env.NEXT_PUBLIC_TOKEN_MINT;
-      const response = await fetch(`/api/holders?mint=${tokenMint}`);
-      const data = await response.json();
+      const response = await fetch('/api/holders?min=0');
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = (data && (data.details || data.error)) || 'Failed to fetch holders';
+        setTokenMissing(message === 'No token yet');
+        throw new Error(message);
+      }
+
+      setTokenMissing(false);
       const holders: Array<{ owner: string; uiAmount?: number }> = Array.isArray(data)
         ? data
         : data.holders || [];
@@ -140,7 +149,9 @@ export default function WalletConnection({ onWalletConnected, onWalletDisconnect
           {publicKey.slice(0, 4)}...{publicKey.slice(-4)}
         </div>
         <div className="text-xs mt-1">
-          {hasEnoughTokens ? (
+          {tokenMissing ? (
+            <span className="text-yellow-300">⚠️ No token yet</span>
+          ) : hasEnoughTokens ? (
             <span className="text-green-400">✅ Chat Enabled (10M+ tokens)</span>
           ) : (
             <span className="text-red-400">❌ Need 10M+ tokens for chat</span>

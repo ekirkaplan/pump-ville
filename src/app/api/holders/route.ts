@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getHolders } from '@/lib/helius';
+import { getTokenMintFromDb } from '@/lib/token-config';
 
 const querySchema = z.object({
-  mint: z.string().min(1, 'Mint address is required'),
+  mint: z.string().optional(),
   min: z.string().optional().transform(val => val ? parseInt(val) : undefined),
 });
 
@@ -11,17 +12,18 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const query = {
-      mint:
-        searchParams.get('mint') ||
-        process.env.NEXT_PUBLIC_TOKEN_MINT ||
-        process.env.TOKEN_MINT,
+      mint: searchParams.get('mint') || undefined,
       min:
         searchParams.get('min') ||
         process.env.NEXT_PUBLIC_MIN_HOLD ||
         process.env.MIN_HOLD,
     };
 
-    const { mint, min } = querySchema.parse(query);
+    const { mint: mintParam, min } = querySchema.parse(query);
+    const mint = mintParam || (await getTokenMintFromDb());
+    if (!mint) {
+      return NextResponse.json({ error: 'No token yet' }, { status: 404 });
+    }
     const safeMin = typeof min === 'number' && Number.isFinite(min) ? min : 10000;
 
     const holders = await getHolders({ mint, min: safeMin });

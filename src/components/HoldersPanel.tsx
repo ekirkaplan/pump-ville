@@ -20,21 +20,15 @@ export default function HoldersPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const tokenMint = process.env.NEXT_PUBLIC_TOKEN_MINT;
   const minHold = parseInt(process.env.NEXT_PUBLIC_MIN_HOLD || '0');
   const safeMinHold = Number.isFinite(minHold) ? minHold : 0;
 
   const fetchHolders = useCallback(async () => {
-    if (!tokenMint) {
-      setError('NEXT_PUBLIC_TOKEN_MINT is not set');
-      return;
-    }
-
     setLoading(true);
     setError('');
     try {
       const response = await fetch(
-        `/api/holders?mint=${encodeURIComponent(tokenMint)}&min=${safeMinHold}`
+        `/api/holders?min=${safeMinHold}`
       );
 
       const data = await response.json().catch(() => null);
@@ -51,7 +45,7 @@ export default function HoldersPanel() {
     } finally {
       setLoading(false);
     }
-  }, [tokenMint, safeMinHold]);
+  }, [safeMinHold]);
 
   useEffect(() => {
     let isActive = true;

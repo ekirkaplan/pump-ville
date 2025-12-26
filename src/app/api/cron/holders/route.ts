@@ -2,16 +2,17 @@ import { NextResponse } from 'next/server';
 import { getHolders } from '@/lib/helius';
 import { getDb } from '@/lib/db';
 import { Assignment } from '@/lib/types';
+import { getTokenMintFromDb } from '@/lib/token-config';
 
 export async function GET() {
   try {
     console.log('🔄 Starting holder refresh cron job...');
     
-    const tokenMint = process.env.NEXT_PUBLIC_TOKEN_MINT;
+    const tokenMint = await getTokenMintFromDb();
     const minHold = parseInt(process.env.NEXT_PUBLIC_MIN_HOLD || '10000');
     
     if (!tokenMint) {
-      return NextResponse.json({ error: 'Token mint not configured' }, { status: 400 });
+      return NextResponse.json({ error: 'No token yet' }, { status: 404 });
     }
 
     // Get current holders from Helius
