@@ -1,10 +1,14 @@
+import dns from 'node:dns';
 import { NextResponse } from 'next/server';
 import { getHolders } from '@/lib/helius';
 import { getDb } from '@/lib/db';
 import { Assignment } from '@/lib/types';
 import { getTokenMintFromDb } from '@/lib/token-config';
 
+dns.setDefaultResultOrder('ipv4first');
+
 export const runtime = 'nodejs';
+export const preferredRegion = 'iad1';
 
 export async function GET() {
   try {

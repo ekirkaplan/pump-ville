@@ -1,3 +1,4 @@
+import { Agent } from 'undici';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { AccountLayout, MintLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { Holder } from './types';
@@ -66,6 +67,11 @@ const getHeliusRpcUrls = () => {
   return Array.from(new Set(urls));
 };
 
+const dispatcher = new Agent({
+  connect: { family: 4 },
+  connections: 10,
+});
+
 // Vercel uyumlu fetch wrapper - timeout destekli
 const fetchWithTimeout = async (
     input: RequestInfo | URL,
@@ -78,7 +84,8 @@ const fetchWithTimeout = async (
     const response = await fetch(input, {
       ...init,
       signal: controller.signal,
-    });
+      dispatcher,
+    } as RequestInit & { dispatcher: Agent });
     return response;
   } finally {
     clearTimeout(timeoutId);
