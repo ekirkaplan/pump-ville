@@ -19,6 +19,11 @@ export const metadata: Metadata = {
   authors: [{ name: 'PumpVille Team' }],
   creator: 'PumpVille',
   publisher: 'PumpVille',
+  icons: {
+    icon: '/ico.ico',
+    shortcut: '/ico.ico',
+    apple: '/ico.ico',
+  },
   openGraph: {
     type: 'website',
     locale: 'en_US',
@@ -52,13 +57,15 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#000000" />
-        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" href="/ico.ico" type="image/x-icon" />
+        <link rel="shortcut icon" href="/ico.ico" type="image/x-icon" />
+        <link rel="apple-touch-icon" href="/ico.ico" />
         <link rel="manifest" href="/manifest.json" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <div className="min-h-screen bg-black">{children}</div>
       </body>
     </html>
   );
